@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  mediamaster:
+    image: jinting1996/mediamaster-v2:latest
+    container_name: mediamaster-v2
+    restart: unless-stopped
+    ports:
+      - "8888:8888"  # Web 端口
+    volumes:
+      # 配置和数据持久化
+      - ./config:/config
+      - ./downloads:/Torrent
+      - ./logs:/tmp/log
+      
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Shanghai
+      
+    # 健康检查
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8888/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # 可选：仅下载器（如果不需要 Web UI）
+  # downloader:
+  #   image: jinting1996/mediamaster-v2:latest
+  #   container_name: mediamaster-downloader
+  #   volumes:
+  #     - ./config:/config
+  #     - ./downloads:/Torrent
+  #   command: python indexer.py
+  #   restart: unless-stopped
