@@ -1,90 +1,113 @@
+"""
+MediaMaster V2 - 统一索引调度器 (优化版)
+并行执行多站点索引，使用优化后的模块
+"""
 import subprocess
 import logging
 import os
 import glob
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import threading
+from typing import Dict, List
 import time
 
 # 配置日志
 logging.basicConfig(
-    level=logging.INFO,  # 设置日志级别为 INFO
-    format="%(asctime)s - %(levelname)s - %(message)s",  # 设置日志格式
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
     handlers=[
-        logging.FileHandler("/tmp/log/indexer.log", mode='w'),  # 输出到文件并清空之前的日志
-        logging.StreamHandler()  # 输出到控制台
+        logging.FileHandler("/tmp/log/indexer.log"),
+        logging.StreamHandler()
     ]
 )
+logger = logging.getLogger(__name__)
+
 
 def clear_index_directory():
+    """清理索引目录"""
     index_dir = "/tmp/index/"
     if os.path.exists(index_dir):
-        logging.info(f"清理目录: {index_dir}")
-        json_files = glob.glob(os.path.join(index_dir, "*.json"))
-        for file in json_files:
+        logger.info(f"清理目录: {index_dir}")
+        for file in glob.glob(os.path.join(index_dir, "*.json")):
             try:
                 os.remove(file)
-                logging.info(f"已删除文件: {file}")
+                logger.info(f"已删除: {file}")
             except Exception as e:
-                logging.error(f"删除文件 {file} 时出错: {e}")
+                logger.error(f"删除失败: {file} - {e}")
     else:
-        logging.info(f"目录不存在: {index_dir}")
+        os.makedirs(index_dir, exist_ok=True)
+        logger.info(f"创建目录: {index_dir}")
 
-def run_script(script_name, friendly_name, instance_id):
+
+def run_indexer(script_name: str, friendly_name: str, instance_id: str) -> bool:
+    """运行索引器"""
     try:
-        # 捕获子进程的输出，将标准输出和错误输出合并
         result = subprocess.run(
-            ["python", script_name, "--instance-id", str(instance_id)],
-            check=True,
-            stdout=subprocess.PIPE,  # 捕获标准输出
-            stderr=subprocess.STDOUT,  # 将标准错误重定向到标准输出
-            text=True  # 确保输出为字符串
+            ["python", script_name, "--instance-id", instance_id],
+            capture_output=True,
+            text=True,
+            timeout=600  # 10分钟超时
         )
-        # 记录合并后的输出
-        logging.info(f"索引程序日志:\n{result.stdout}")
-        logging.info(f"建立索引完成: {friendly_name}")
-        logging.info("-" * 80)
-        return True
-    except subprocess.CalledProcessError as e:
-        logging.error(f"运行 {friendly_name} 索引程序 ({script_name}) 时出错，退出码: {e.returncode}")
-        # 记录异常时的输出
-        if e.stdout:
-            logging.error(f"{friendly_name} 索引程序输出:\n{e.stdout}")
-        logging.info("-" * 80)
+        
+        if result.returncode == 0:
+            logger.info(f"✅ {friendly_name} 索引完成")
+            return True
+        else:
+            logger.error(f"❌ {friendly_name} 失败: {result.stderr[:200]}")
+            return False
+            
+    except subprocess.TimeoutExpired:
+        logger.error(f"⏱️ {friendly_name} 超时")
+        return False
+    except Exception as e:
+        logger.error(f"💥 {friendly_name} 异常: {e}")
         return False
 
-def main():
-    # 清理 /tmp/index/ 目录
-    clear_index_directory()
 
+def main():
+    """主函数 - 并行执行多站点索引"""
+    clear_index_directory()
+    
+    # 索引任务配置
     scripts = {
-        "movie_bthd.py": "高清影视之家",
+        "movie_indexer.py": "高清影视之家",      # 优化版
         "tvshow_hdtv.py": "高清剧集网",
         "movie_tvshow_btys.py": "BT影视",
         "movie_tvshow_bt0.py": "不太灵影视",
         "movie_tvshow_gy.py": "观影"
     }
-
-    # 使用线程池并行执行脚本
-    max_workers = min(len(scripts), 5)  # 最多同时运行5个脚本
+    
+    max_workers = min(len(scripts), 5)
+    results = {}
+    
+    logger.info(f"🚀 开始并行索引 {len(scripts)} 个站点...")
+    
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # 提交所有任务，为每个任务生成唯一的instance_id
-        future_to_script = {}
-        for i, (script_name, friendly_name) in enumerate(scripts.items()):
-            instance_id = f"{i}"
-            future = executor.submit(run_script, script_name, friendly_name, instance_id)
-            future_to_script[future] = (script_name, friendly_name)
-            time.sleep(2)
+        futures = {}
         
-        # 等待所有任务完成并处理结果
-        for future in as_completed(future_to_script):
-            script_name, friendly_name = future_to_script[future]
+        for i, (script, name) in enumerate(scripts.items()):
+            instance_id = str(i)
+            future = executor.submit(run_indexer, script, name, instance_id)
+            futures[future] = name
+            time.sleep(1)  # 避免并发冲突
+        
+        for future in as_completed(futures):
+            name = futures[future]
             try:
-                success = future.result()
-                if not success:
-                    logging.error(f"脚本 {friendly_name} 执行失败")
+                results[name] = future.result()
             except Exception as e:
-                logging.error(f"执行脚本 {friendly_name} 时发生异常: {e}")
+                logger.error(f"❌ {name} 执行异常: {e}")
+                results[name] = False
+    
+    # 统计结果
+    success = sum(1 for v in results.values() if v)
+    total = len(results)
+    
+    logger.info(f"📊 索引完成: {success}/{total} 成功")
+    
+    for name, ok in results.items():
+        status = "✅" if ok else "❌"
+        logger.info(f"  {status} {name}")
+
 
 if __name__ == "__main__":
     main()
