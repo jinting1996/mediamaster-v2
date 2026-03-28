@@ -27,32 +27,16 @@ import threading
 import uuid
 from collections import deque
 
+# 配置日志
+from app.utils.logging import setup_logger, log_error, log_info, log_warning, log_debug
+logger = setup_logger(name="MediaMasterLogger", log_file="/tmp/log/app.log")
+
 # 使用线程安全的字典存储下载进度
 download_progress_messages = {}
 # 使用锁确保线程安全
 progress_lock = threading.Lock()
 
-# 配置日志
-# 创建独立的 logger 实例
-logger = logging.getLogger("MediaMasterLogger")
-logger.setLevel(logging.INFO)
 
-# 禁用日志传播
-logger.propagate = False
-
-# 配置日志处理器
-if not logger.handlers:
-    file_handler = logging.FileHandler("/tmp/log/app.log", mode='w')
-    stream_handler = logging.StreamHandler()
-
-    # 设置日志格式
-    formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
-    file_handler.setFormatter(formatter)
-    stream_handler.setFormatter(formatter)
-
-    # 添加处理器到 logger
-    logger.addHandler(file_handler)
-    logger.addHandler(stream_handler)
 
 app = Flask(__name__)
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1, x_prefix=1)
@@ -65,7 +49,7 @@ def get_app_version():
         with open("versions", "r") as file:
             return file.read().strip()
     except FileNotFoundError:
-        logger.warning("versions 文件未找到，使用默认版本号")
+        log_warning(logger,("versions 文件未找到，使用默认版本号")
         return "unknown"
 
 APP_VERSION = get_app_version()
@@ -110,9 +94,9 @@ def create_soft_link(src, dst):
     # 创建软链接
     if not os.path.exists(dst):
         os.symlink(src, dst)
-        logger.info(f"软链接创建成功: {src} -> {dst}")
+        log_info(logger,(f"软链接创建成功: {src} -> {dst}")
     else:
-        logger.info(f"软链接已存在: {dst}")
+        log_info(logger,(f"软链接已存在: {dst}")
 
 @app.route('/login', methods=('GET', 'POST'))
 def login():
@@ -122,7 +106,7 @@ def login():
         # 获取记住我选项
         remember_me = request.form.get('remember') == 'on'  # 检查是否勾选了自动登录
         
-        logger.info(f"用户 {username} 尝试登录，记住我: {remember_me}")
+        log_info(logger,(f"用户 {username} 尝试登录，记住我: {remember_me}")
         
         db = get_db()
         error = None
@@ -130,7 +114,7 @@ def login():
         
         if user is None:
             error = '用户名或密码错误'
-            logger.warning(f"用户 {username} 登录失败: 用户不存在")
+            log_warning(logger,(f"用户 {username} 登录失败: 用户不存在")
         else:
             # 检查并处理密码字段类型兼容性问题
             stored_password = user['PASSWORD']
@@ -138,7 +122,7 @@ def login():
                 stored_password = stored_password.encode('utf-8')
             elif not isinstance(stored_password, bytes):
                 error = '用户数据格式异常，请重置密码！'
-                logger.error(f"用户 {username} 登录失败: 用户数据格式异常，请重置密码！")
+                log_error(logger,(f"用户 {username} 登录失败: 用户数据格式异常，请重置密码！")
             else:
                 # stored_password 已经是 bytes 类型
                 pass
@@ -147,7 +131,7 @@ def login():
             if error is None:
                 if not bcrypt.checkpw(password.encode('utf-8'), stored_password):
                     error = '用户名或密码错误'
-                    logger.warning(f"用户 {username} 登录失败: 密码错误")
+                    log_warning(logger,(f"用户 {username} 登录失败: 密码错误")
         
         if error is None:
             # 登录成功
@@ -162,11 +146,11 @@ def login():
                 # 勾选了自动登录，设置session为30天后过期
                 session.permanent = True
                 app.permanent_session_lifetime = timedelta(days=30)
-                logger.info(f"用户 {username} 登录成功，已启用自动登录(30天)")
+                log_info(logger,(f"用户 {username} 登录成功，已启用自动登录(30天)")
             else:
                 # 未勾选自动登录，设置为浏览器会话级别（关闭浏览器即失效）
                 session.permanent = False
-                logger.info(f"用户 {username} 登录成功，未启用自动登录(浏览器会话级别)")
+                log_info(logger,(f"用户 {username} 登录成功，未启用自动登录(浏览器会话级别)")
 
             # 返回JSON响应给前端
             return jsonify({
@@ -187,7 +171,7 @@ def login():
 @app.route('/logout')
 def logout():
     username = session.get('username')
-    logger.info(f"用户 {username} 登出")
+    log_info(logger,(f"用户 {username} 登出")
     session.clear()
     return redirect(url_for('login'))
 
@@ -205,7 +189,7 @@ def update_profile():
     try:
         user_id = session['user_id']
         nickname = session.get('nickname')
-        logger.info(f"用户 {nickname} 更新个人资料")
+        log_info(logger,(f"用户 {nickname} 更新个人资料")
         db = get_db()
 
         # 获取表单数据
@@ -221,15 +205,15 @@ def update_profile():
                 # 同时更新用户名和昵称
                 db.execute('UPDATE USERS SET USERNAME = ?, NICKNAME = ? WHERE ID = ?', 
                           (username, nickname_input, user_id))
-                logger.info(f"用户 {nickname} 更新了用户名和昵称: {username}, {nickname_input}")
+                log_info(logger,(f"用户 {nickname} 更新了用户名和昵称: {username}, {nickname_input}")
             elif username:
                 # 只更新用户名
                 db.execute('UPDATE USERS SET USERNAME = ? WHERE ID = ?', (username, user_id))
-                logger.info(f"用户 {nickname} 更新了用户名: {username}")
+                log_info(logger,(f"用户 {nickname} 更新了用户名: {username}")
             elif nickname_input:
                 # 只更新昵称
                 db.execute('UPDATE USERS SET NICKNAME = ? WHERE ID = ?', (nickname_input, user_id))
-                logger.info(f"用户 {nickname} 更新了昵称: {nickname_input}")
+                log_info(logger,(f"用户 {nickname} 更新了昵称: {nickname_input}")
         
         # 更新头像
         if avatar_file and allowed_file(avatar_file.filename):
@@ -241,14 +225,14 @@ def update_profile():
             avatar_url = f"/{upload_folder}/{filename}"
             # 注意：这里使用大写字段名 'AVATAR_URL'
             db.execute('UPDATE USERS SET AVATAR_URL = ? WHERE ID = ?', (avatar_url, user_id))
-            logger.info(f"用户 {nickname} 更新了头像: {avatar_url}")
+            log_info(logger,(f"用户 {nickname} 更新了头像: {avatar_url}")
             updated_avatar = True
         elif not avatar_file:
-            logger.info(f"用户 {nickname} 未选择新头像，跳过头像更新")
+            log_info(logger,(f"用户 {nickname} 未选择新头像，跳过头像更新")
 
         # 提交数据库更改
         db.commit()
-        logger.info(f"用户 {nickname} 个人资料更新成功")
+        log_info(logger,(f"用户 {nickname} 个人资料更新成功")
 
         # 更新会话中的信息
         if username:
@@ -261,7 +245,7 @@ def update_profile():
 
         return jsonify({"success": True, "message": "个人资料更新成功"})
     except Exception as e:
-        logger.error(f"更新个人资料失败: {e}")
+        log_error(logger,(f"更新个人资料失败: {e}")
         return jsonify({"success": False, "message": "更新失败，请稍后再试"}), 500
 
 # 修改密码路由
@@ -271,7 +255,7 @@ def change_password():
     try:
         user_id = session['user_id']
         nickname = session.get('nickname')
-        logger.info(f"用户 {nickname} 请求修改密码")
+        log_info(logger,(f"用户 {nickname} 请求修改密码")
 
         # 获取表单数据
         old_password = request.form.get('old_password')
@@ -280,12 +264,12 @@ def change_password():
         
         # 验证输入
         if not old_password or not new_password:
-            logger.warning(f"用户 {nickname} 密码修改失败: 缺少必要参数")
+            log_warning(logger,(f"用户 {nickname} 密码修改失败: 缺少必要参数")
             return jsonify(success=False, message='请提供当前密码和新密码。'), 400
             
         # 验证确认密码
         if new_password != confirm_password:
-            logger.warning(f"用户 {nickname} 密码修改失败: 新密码和确认密码不一致")
+            log_warning(logger,(f"用户 {nickname} 密码修改失败: 新密码和确认密码不一致")
             return jsonify(success=False, message='新密码和确认密码不一致。'), 400
 
         db = get_db()
@@ -293,7 +277,7 @@ def change_password():
         # 获取当前用户信息
         user = db.execute('SELECT * FROM USERS WHERE ID = ?', (user_id,)).fetchone()
         if not user:
-            logger.error(f"用户 {nickname} 密码修改失败: 用户不存在")
+            log_error(logger,(f"用户 {nickname} 密码修改失败: 用户不存在")
             return jsonify(success=False, message='用户不存在。'), 400
 
         # 验证当前密码 (使用 bcrypt 验证)
@@ -302,7 +286,7 @@ def change_password():
             hashed_password = hashed_password.decode('utf-8')
             
         if not bcrypt.checkpw(old_password.encode('utf-8'), hashed_password.encode('utf-8')):
-            logger.warning(f"用户 {nickname} 密码修改失败: 当前密码错误")
+            log_warning(logger,(f"用户 {nickname} 密码修改失败: 当前密码错误")
             return jsonify(success=False, message='当前密码错误。'), 400
 
         # 更新密码 (使用 bcrypt 生成新密码)
@@ -313,16 +297,16 @@ def change_password():
         db.execute('UPDATE USERS SET PASSWORD = ? WHERE ID = ?', (new_hashed_password, user_id))
         db.commit()
         
-        logger.info(f"用户 {nickname} 密码修改成功")
+        log_info(logger,(f"用户 {nickname} 密码修改成功")
         return jsonify(success=True, message='密码修改成功！'), 200
         
     except Exception as e:
-        logger.error(f"修改密码失败: {e}")
+        log_error(logger,(f"修改密码失败: {e}")
         return jsonify(success=False, message='密码修改失败，请稍后再试。'), 500
 
 @app.errorhandler(InternalServerError)
 def handle_500(error):
-    logger.error(f"服务器错误: {error}")
+    log_error(logger,(f"服务器错误: {error}")
     return render_template('500.html'), 500
 
 @app.route('/')
@@ -390,7 +374,7 @@ def system_resources():
             net_io_sent_per_sec = 0
             net_io_recv_per_sec = 0
     except Exception as e:
-        logger.error(f"获取下载器信息失败: {e}")
+        log_error(logger,(f"获取下载器信息失败: {e}")
         net_io_sent_per_sec = 0
         net_io_recv_per_sec = 0
 
@@ -491,7 +475,7 @@ def site_status():
                 result = db.execute('SELECT VALUE FROM CONFIG WHERE OPTION = ?', (option_name,)).fetchone()
                 enabled_sites[site_name] = result['VALUE'] == 'True' if result else False
             except Exception as e:
-                logger.error(f"读取站点 {site_name} 启用状态失败: {e}")
+                log_error(logger,(f"读取站点 {site_name} 启用状态失败: {e}")
                 enabled_sites[site_name] = False
         
         # 读取站点状态文件
@@ -506,11 +490,11 @@ def site_status():
                     site_status_data = data.get('status', {})
                     last_checked = data.get('last_checked')
             except json.JSONDecodeError as e:
-                logger.error(f"解析站点状态文件失败: {e}")
+                log_error(logger,(f"解析站点状态文件失败: {e}")
             except Exception as e:
-                logger.error(f"读取站点状态文件失败: {e}")
+                log_error(logger,(f"读取站点状态文件失败: {e}")
         else:
-            logger.warning("站点状态文件不存在")
+            log_warning(logger,("站点状态文件不存在")
         
         # 返回站点信息
         site_info = []
@@ -528,7 +512,7 @@ def site_status():
             'status': site_status_data
         })
     except Exception as e:
-        logger.error(f"获取站点状态失败: {e}")
+        log_error(logger,(f"获取站点状态失败: {e}")
         return jsonify({'error': '获取站点状态失败'}), 500
 
 @app.route('/api/check_site_status', methods=['POST'])
@@ -570,7 +554,7 @@ def check_site_status():
             'last_checked': status_data['last_checked']
         })
     except Exception as e:
-        logger.error(f"检查站点状态失败: {e}")
+        log_error(logger,(f"检查站点状态失败: {e}")
         return jsonify({'error': '检查站点状态失败'}), 500
 
 @app.route('/recommendations')
@@ -728,7 +712,7 @@ def library():
                                avatar_url=avatar_url,
                                version=APP_VERSION)
     except Exception as e:
-        logger.error(f"发生错误: {e}")
+        log_error(logger,(f"发生错误: {e}")
         raise InternalServerError("发生意外错误，请稍后再试。")
 
 @app.route('/subscriptions')
@@ -813,7 +797,7 @@ def add_subscription():
                 (new_douban_id, title, year, season, missing_episodes)
             )
             db.commit()
-            logger.info(f"用户添加电视剧订阅: {title} ({year}) 季{season} 集{start_episode}-{end_episode} DOUBAN_ID: {new_douban_id}")
+            log_info(logger,(f"用户添加电视剧订阅: {title} ({year}) 季{season} 集{start_episode}-{end_episode} DOUBAN_ID: {new_douban_id}")
             return jsonify({"success": True, "message": "电视剧订阅添加成功"})
 
         elif subscription_type == 'movie':  # 电影订阅
@@ -841,14 +825,14 @@ def add_subscription():
                 (new_douban_id, title, year)
             )
             db.commit()
-            logger.info(f"用户添加电影订阅: {title} ({year}) DOUBAN_ID: {new_douban_id}")
+            log_info(logger,(f"用户添加电影订阅: {title} ({year}) DOUBAN_ID: {new_douban_id}")
             return jsonify({"success": True, "message": "电影订阅添加成功"})
 
         else:
             return jsonify({"success": False, "message": "无效的订阅类型"}), 400
 
     except Exception as e:
-        logger.error(f"添加订阅失败: {e}")
+        log_error(logger,(f"添加订阅失败: {e}")
         return jsonify({"success": False, "message": "添加订阅失败，请稍后再试"}), 500
 
 # 取消热门推荐中的订阅
@@ -885,7 +869,7 @@ def cancel_subscription():
                 (title, year, season)
             )
             db.commit()
-            logger.info(f"用户取消电视剧订阅: {title} ({year}) 季{season}")
+            log_info(logger,(f"用户取消电视剧订阅: {title} ({year}) 季{season}")
             return jsonify({"success": True, "message": "电视剧订阅已取消"})
 
         elif media_type == 'movie':  # 电影取消订阅
@@ -904,14 +888,14 @@ def cancel_subscription():
                 (title, year)
             )
             db.commit()
-            logger.info(f"用户取消电影订阅: {title} ({year})")
+            log_info(logger,(f"用户取消电影订阅: {title} ({year})")
             return jsonify({"success": True, "message": "电影订阅已取消"})
 
         else:
             return jsonify({"success": False, "message": "无效的媒体类型"}), 400
 
     except Exception as e:
-        logger.error(f"取消订阅失败: {e}")
+        log_error(logger,(f"取消订阅失败: {e}")
         return jsonify({"success": False, "message": "取消订阅失败，请稍后再试"}), 500
 
 # 从热门推荐中添加订阅
@@ -972,7 +956,7 @@ def tmdb_subscriptions():
             return jsonify({"success": True, "message": "电影订阅成功"})
 
     except Exception as e:
-        logger.error(f"订阅处理失败: {e}")
+        log_error(logger,(f"订阅处理失败: {e}")
         return jsonify({"success": False, "message": "订阅失败，请稍后再试"}), 500
 
 # 检查热门推荐中的订阅状态（是否已订阅或已入库）
@@ -1026,7 +1010,7 @@ def check_subscriptions():
 
         return jsonify({"subscribed": False, "status": "not_found"})
     except Exception as e:
-        logger.error(f"检查订阅状态失败: {e}")
+        log_error(logger,(f"检查订阅状态失败: {e}")
         return jsonify({"subscribed": False, "error": "检查失败"}), 500
 
 @app.route('/edit_subscription/<type>/<int:id>', methods=['GET', 'POST'])
@@ -1053,11 +1037,11 @@ def edit_subscription(type, id):
                 db.execute('UPDATE MISS_TVS SET title = ?, season = ?, missing_episodes = ? WHERE id = ?', 
                           (title, season, missing_episodes, id))
             db.commit()
-            logger.info(f"用户更新订阅: {type} ID={id}")
+            log_info(logger,(f"用户更新订阅: {type} ID={id}")
             return jsonify(success=True, message="订阅更新成功")
         except Exception as e:
             db.rollback()
-            logger.error(f"更新订阅失败: {e}")
+            log_error(logger,(f"更新订阅失败: {e}")
             return jsonify(success=False, message="更新失败，请稍后再试"), 500
 
     # GET 请求时返回 JSON 数据
@@ -1115,7 +1099,7 @@ def douban_subscriptions_json():
             "rss_tvs": tvs_data
         })
     except Exception as e:
-        logger.error(f"获取豆瓣订阅数据失败: {e}")
+        log_error(logger,(f"获取豆瓣订阅数据失败: {e}")
         return jsonify({"error": "获取数据失败"}), 500
 
 # 获取剧集关联列表的JSON接口
@@ -1129,7 +1113,7 @@ def tv_alias_list_json():
         alias_list_dict = [dict(row) for row in alias_list]
         return jsonify({"alias_list": alias_list_dict})
     except Exception as e:
-        logger.error(f"获取剧集关联列表失败: {e}")
+        log_error(logger,(f"获取剧集关联列表失败: {e}")
         return jsonify({"error": "获取剧集关联列表失败"}), 500
 
 # 获取单个剧集关联信息的JSON接口
@@ -1144,7 +1128,7 @@ def tv_alias_edit_json(alias_id):
         else:
             return jsonify({"error": "未找到该关联"}), 404
     except Exception as e:
-        logger.error(f"获取剧集关联信息失败: {e}")
+        log_error(logger,(f"获取剧集关联信息失败: {e}")
         return jsonify({"error": "获取剧集关联信息失败"}), 500
 
 # 添加剧集关联的API接口
@@ -1169,7 +1153,7 @@ def tv_alias_add_api():
         except sqlite3.IntegrityError:
             return jsonify({"success": False, "message": "该别名已存在"}), 400
     except Exception as e:
-        logger.error(f"添加剧集关联失败: {e}")
+        log_error(logger,(f"添加剧集关联失败: {e}")
         return jsonify({"success": False, "message": "添加失败，请稍后再试"}), 500
 
 # 编辑剧集关联的API接口
@@ -1198,7 +1182,7 @@ def tv_alias_edit_api(alias_id):
         except sqlite3.IntegrityError:
             return jsonify({"success": False, "message": "该别名已存在"}), 400
     except Exception as e:
-        logger.error(f"更新剧集关联失败: {e}")
+        log_error(logger,(f"更新剧集关联失败: {e}")
         return jsonify({"success": False, "message": "更新失败，请稍后再试"}), 500
 
 # 删除剧集关联的API接口
@@ -1215,7 +1199,7 @@ def tv_alias_delete_api(alias_id):
         db.commit()
         return jsonify({"success": True, "message": "删除成功"})
     except Exception as e:
-        logger.error(f"删除剧集关联失败: {e}")
+        log_error(logger,(f"删除剧集关联失败: {e}")
         return jsonify({"success": False, "message": "删除失败，请稍后再试"}), 500
 
 @app.route('/service_control')
@@ -1232,17 +1216,17 @@ def run_service():
     data = request.get_json()
     service = data.get('service')
     try:
-        logger.info(f"尝试启动服务: {service}")
+        log_info(logger,(f"尝试启动服务: {service}")
         log_file_path = f'/tmp/log/{service}.log'
         os.makedirs(os.path.dirname(log_file_path), exist_ok=True)  # 确保日志目录存在
         with open(log_file_path, 'w', encoding='utf-8') as log_file:
             process = subprocess.Popen(['python3', f'/app/{service}.py'], stdout=log_file, stderr=log_file)
             pid = process.pid
             running_services[service] = pid
-        logger.info(f"服务 {service} 启动成功，PID: {pid}")
+        log_info(logger,(f"服务 {service} 启动成功，PID: {pid}")
         return jsonify({"message": "服务运行成功！", "pid": pid}), 200
     except Exception as e:
-        logger.error(f"服务 {service} 启动失败: {e}")
+        log_error(logger,(f"服务 {service} 启动失败: {e}")
         return jsonify({"message": str(e)}), 500
 
 @app.route('/realtime_log/<string:service>')
@@ -1252,17 +1236,17 @@ def realtime_log(service):
     def generate():
         log_file_path = f'/tmp/log/{service}.log'
         if not os.path.exists(log_file_path):
-            logger.warning(f"实时日志文件不存在: {log_file_path}")
+            log_warning(logger,(f"实时日志文件不存在: {log_file_path}")
             yield 'data: 当前没有实时运行日志，请检查服务是否正在运行！\n\n'.encode('utf-8')
             return
         
         # 检查文件是否为空
         if os.path.getsize(log_file_path) == 0:
-            logger.warning(f"实时日志文件为空: {log_file_path}")
+            log_warning(logger,(f"实时日志文件为空: {log_file_path}")
             yield 'data: 当前日志文件为空\n\n'.encode('utf-8')
             return
 
-        logger.info(f"开始读取实时日志: {log_file_path}")
+        log_info(logger,(f"开始读取实时日志: {log_file_path}")
         with open(log_file_path, 'r', encoding='utf-8') as log_file:
             while True:
                 line = log_file.readline()
@@ -1270,7 +1254,7 @@ def realtime_log(service):
                     time.sleep(0.1)
                     # 检查是否需要停止日志传输
                     if not log_streaming_status.get(service, True):
-                        logger.info(f"停止读取日志: {log_file_path}")
+                        log_info(logger,(f"停止读取日志: {log_file_path}")
                         break
                     continue
                 yield f'data: {line}\n\n'
@@ -1282,10 +1266,10 @@ def realtime_log(service):
 def stop_realtime_log(service):
     try:
         log_streaming_status[service] = False  # 设置日志传输状态为 False
-        logger.info(f"停止实时日志传输: {service}")
+        log_info(logger,(f"停止实时日志传输: {service}")
         return jsonify({"message": "实时日志传输已停止"}), 200
     except Exception as e:
-        logger.error(f"停止实时日志传输失败: {e}")
+        log_error(logger,(f"停止实时日志传输失败: {e}")
         return jsonify({"message": "停止实时日志传输失败"}), 500
 
 # 手动搜索和下载接口
@@ -1298,7 +1282,7 @@ def manual_search():
     # 从数据库中读取 tmdb_api_key
     tmdb_api_key = db.execute('SELECT VALUE FROM CONFIG WHERE OPTION = ?', ('tmdb_api_key',)).fetchone()
     tmdb_api_key = tmdb_api_key['VALUE'] if tmdb_api_key else None
-    logger.info(f"用户 {nickname} 访问手动搜索页面")
+    log_info(logger,(f"用户 {nickname} 访问手动搜索页面")
     return render_template('manual_search.html', nickname=nickname, avatar_url=avatar_url, version=APP_VERSION, tmdb_api_key=tmdb_api_key)
 
 @app.route('/api/search_media', methods=['POST'])
@@ -1316,10 +1300,10 @@ def api_search_media():
     nickname = session.get('nickname')
 
     if not media_type or not title or not year:
-        logger.warning(f"用户 {nickname} 搜索资源失败: 缺少参数")
+        log_warning(logger,(f"用户 {nickname} 搜索资源失败: 缺少参数")
         return jsonify({'error': '缺少参数'}), 400
 
-    logger.info(f"用户 {nickname} 搜索资源: 类型={media_type}, 标题={title}, 年份={year}" + (f", 季数={season}" if season else "") + (f", 强制刷新={force_refresh}" if force_refresh else ""))
+    log_info(logger,(f"用户 {nickname} 搜索资源: 类型={media_type}, 标题={title}, 年份={year}" + (f", 季数={season}" if season else "") + (f", 强制刷新={force_refresh}" if force_refresh else ""))
     
     def generate():
         try:
@@ -1441,7 +1425,7 @@ def api_search_media():
                             yield f"data: {json.dumps({'status': 'result', 'site': site, 'data': all_results[site]})}\n\n"
                             
                         except Exception as e:
-                            logger.error(f"读取缓存搜索结果失败: {result_file}, 错误: {e}")
+                            log_error(logger,(f"读取缓存搜索结果失败: {result_file}, 错误: {e}")
                     
                     yield f"data: {json.dumps({'status': 'complete', 'message': '缓存结果加载完成'})}\n\n"
                     return
@@ -1511,10 +1495,10 @@ def api_search_media():
                 try:
                     # 执行搜索脚本
                     subprocess.run(script_command, shell=True, check=True)
-                    logger.info(f"成功执行脚本: {script_command}")
+                    log_info(logger,(f"成功执行脚本: {script_command}")
                     return script_info, True
                 except subprocess.CalledProcessError as e:
-                    logger.error(f"执行脚本失败: {script_command}, 错误: {e}")
+                    log_error(logger,(f"执行脚本失败: {script_command}, 错误: {e}")
                     return script_info, False
             
             # 使用线程池并行执行脚本
@@ -1622,7 +1606,7 @@ def api_search_media():
                                 yield f"data: {json.dumps({'status': 'result', 'site': site, 'data': all_results[site]})}\n\n"
                                 
                         except Exception as e:
-                            logger.error(f"读取搜索结果失败: {result_file}, 错误: {e}")
+                            log_error(logger,(f"读取搜索结果失败: {result_file}, 错误: {e}")
                     
                     message = f'完成站点 {script_info["site"]} 搜索 ({completed_count}/{total_scripts})'
                     yield f"data: {json.dumps({'status': 'progress', 'message': message})}\n\n"
@@ -1630,7 +1614,7 @@ def api_search_media():
             yield f"data: {json.dumps({'status': 'complete', 'message': '所有搜索完成'})}\n\n"
             
         except Exception as e:
-            logger.error(f"用户 {nickname} 搜索资源失败: {e}")
+            log_error(logger,(f"用户 {nickname} 搜索资源失败: {e}")
             yield f"data: {json.dumps({'status': 'error', 'message': '搜索过程中发生错误'})}\n\n"
 
     return Response(stream_with_context(generate()), mimetype='text/plain')
@@ -1653,7 +1637,7 @@ def download_progress(task_id):
             else:
                 return jsonify({"messages": ["等待任务开始..."]})
     except Exception as e:
-        logger.error(f"获取下载进度失败: {e}")
+        log_error(logger,(f"获取下载进度失败: {e}")
         return jsonify({"error": "获取进度失败"}), 500
 
 # 下载资源API
@@ -1674,7 +1658,7 @@ def download_resource():
 
         # 检查必要参数
         if not site or not title or not link:
-            logger.warning("下载资源失败: 缺少必要参数")
+            log_warning(logger,("下载资源失败: 缺少必要参数")
             return jsonify({"error": "缺少必要参数"}), 400
 
         # 生成任务ID
@@ -1694,7 +1678,7 @@ def download_resource():
             '--link', str(link)
         ]
         
-        logger.info(f"执行下载命令: {' '.join(command)}")
+        log_info(logger,(f"执行下载命令: {' '.join(command)}")
 
         # 异步执行下载任务
         def run_download():
@@ -1727,7 +1711,7 @@ def download_resource():
                 process.poll()
                 
             except Exception as e:
-                logger.error(f"执行下载任务失败: {e}")
+                log_error(logger,(f"执行下载任务失败: {e}")
                 error_msg = f"下载出错: {str(e)}"
                 with progress_lock:
                     if task_id in download_progress_messages:
@@ -1745,7 +1729,7 @@ def download_resource():
         }), 200
             
     except Exception as e:
-        logger.error(f"添加任务失败: {e}")
+        log_error(logger,(f"添加任务失败: {e}")
         return jsonify({"error": str(e)}), 500
 
 GROUP_MAPPING = {
@@ -1909,14 +1893,14 @@ def save_settings():
             if not key.endswith('_id'):
                 option_id = form_data.get(f"{key}_id")
                 if option_id:
-                    logger.info(f"更新配置项 ID={option_id}, KEY={key}, VALUE={value}")
+                    log_info(logger,(f"更新配置项 ID={option_id}, KEY={key}, VALUE={value}")
                     db.execute('UPDATE CONFIG SET VALUE = ? WHERE ID = ?', (value, option_id))
         db.commit()
-        logger.info("配置保存成功")
+        log_info(logger,("配置保存成功")
         flash('设置已成功保存！', 'success')
     except Exception as e:
         db.rollback()
-        logger.error(f"配置保存失败: {e}")
+        log_error(logger,(f"配置保存失败: {e}")
         flash('设置保存失败，请稍后再试。', 'error')
     return redirect(url_for('settings_page'))
 
@@ -1979,7 +1963,7 @@ def browse_directory():
             
         return jsonify({'path': path, 'items': items})
     except Exception as e:
-        logger.error(f"浏览目录失败: {e}")
+        log_error(logger,(f"浏览目录失败: {e}")
         return jsonify({'error': '浏览目录失败'}), 500
 
 @app.route('/api/create_directory', methods=['POST'])
@@ -2008,12 +1992,12 @@ def create_directory():
             
         # 创建目录
         os.makedirs(new_dir_path, exist_ok=True)
-        logger.info(f"成功创建目录: {new_dir_path}")
+        log_info(logger,(f"成功创建目录: {new_dir_path}")
         
         # 返回新建目录的完整路径
         return jsonify({'message': '目录创建成功', 'path': new_dir_path}), 200
     except Exception as e:
-        logger.error(f"创建目录失败: {e}")
+        log_error(logger,(f"创建目录失败: {e}")
         return jsonify({'error': '创建目录失败'}), 500
 
 @app.route('/api/rename_directory', methods=['POST'])
@@ -2048,11 +2032,11 @@ def rename_directory():
             
         # 重命名目录
         os.rename(old_path, new_path)
-        logger.info(f"成功重命名目录: {old_path} -> {new_path}")
+        log_info(logger,(f"成功重命名目录: {old_path} -> {new_path}")
         
         return jsonify({'message': '目录重命名成功', 'path': new_path}), 200
     except Exception as e:
-        logger.error(f"重命名目录失败: {e}")
+        log_error(logger,(f"重命名目录失败: {e}")
         return jsonify({'error': '重命名目录失败'}), 500
 
 @app.route('/download_mgmt')
@@ -2215,7 +2199,7 @@ def list_torrents():
 
         return jsonify({"torrents": result})
     except Exception as e:
-        logger.error(f"获取任务列表失败: {e}")
+        log_error(logger,(f"获取任务列表失败: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/download/add', methods=['POST'])
@@ -2242,7 +2226,7 @@ def add_torrent():
                 # 解码Base64字符串
                 torrent_data = base64.b64decode(task_value)
             except Exception as e:
-                logger.error(f"Base64解码失败: {e}")
+                log_error(logger,(f"Base64解码失败: {e}")
                 return jsonify({"error": "无效的Base64数据"}), 400
 
             # 添加种子文件任务
@@ -2256,7 +2240,7 @@ def add_torrent():
 
         return jsonify({"message": "添加成功"})
     except Exception as e:
-        logger.error(f"添加任务失败: {e}")
+        log_error(logger,(f"添加任务失败: {e}")
         return jsonify({"error": str(e)}), 500
 
 # 批量操作（启动、暂停、删除）的API
@@ -2269,7 +2253,7 @@ def bulk_action(action):
 
         # 获取任务 ID 列表
         task_ids = data.get("ids", [])
-        logger.info(f"执行操作 {action}，任务ID列表: {task_ids}")
+        log_info(logger,(f"执行操作 {action}，任务ID列表: {task_ids}")
         
         if not task_ids:
             return jsonify({"error": "任务 ID 列表为空"}), 400
@@ -2280,7 +2264,7 @@ def bulk_action(action):
             db = get_db()
             delete_with_files_config = db.execute('SELECT VALUE FROM CONFIG WHERE OPTION = ?', ('delete_with_files',)).fetchone()
             delete_with_files = delete_with_files_config and delete_with_files_config['VALUE'] == 'True'
-            logger.info(f"delete_with_files 配置: {delete_with_files}")
+            log_info(logger,(f"delete_with_files 配置: {delete_with_files}")
 
         # 执行批量操作
         if action == "start":
@@ -2291,9 +2275,9 @@ def bulk_action(action):
                 for task_id in task_ids:
                     try:
                         client.torrents_resume(hashes=task_id)
-                        logger.info(f"已启动任务: {task_id}")
+                        log_info(logger,(f"已启动任务: {task_id}")
                     except Exception as e:
-                        logger.error(f"启动任务 {task_id} 失败: {e}")
+                        log_error(logger,(f"启动任务 {task_id} 失败: {e}")
         elif action == "pause":
             if isinstance(client, TransmissionClient):
                 client.stop_torrent([int(task_id) for task_id in task_ids])
@@ -2302,9 +2286,9 @@ def bulk_action(action):
                 for task_id in task_ids:
                     try:
                         client.torrents_pause(hashes=task_id)
-                        logger.info(f"已暂停任务: {task_id}")
+                        log_info(logger,(f"已暂停任务: {task_id}")
                     except Exception as e:
-                        logger.error(f"暂停任务 {task_id} 失败: {e}")
+                        log_error(logger,(f"暂停任务 {task_id} 失败: {e}")
         elif action == "delete":
             if isinstance(client, TransmissionClient):
                 client.remove_torrent([int(task_id) for task_id in task_ids], delete_data=delete_with_files)
@@ -2313,16 +2297,16 @@ def bulk_action(action):
                 for task_id in task_ids:
                     try:
                         client.torrents_delete(delete_files=delete_with_files, hashes=task_id)
-                        logger.info(f"已删除任务: {task_id}")
+                        log_info(logger,(f"已删除任务: {task_id}")
                     except Exception as e:
-                        logger.error(f"删除任务 {task_id} 失败: {e}")
+                        log_error(logger,(f"删除任务 {task_id} 失败: {e}")
         else:
             return jsonify({"error": "无效的操作"}), 400
 
-        logger.info(f"{action} 操作成功完成")
+        log_info(logger,(f"{action} 操作成功完成")
         return jsonify({"message": f"{action} 成功"})
     except Exception as e:
-        logger.error(f"批量操作失败: {e}", exc_info=True)
+        log_error(logger,(f"批量操作失败: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 # 用于切换 delete_with_files 设置
@@ -2339,10 +2323,10 @@ def toggle_delete_with_files():
                   ('True' if enabled else 'False', 'delete_with_files'))
         db.commit()
         
-        logger.info(f"删除任务时同时删除本地文件设置已更新为: {enabled}")
+        log_info(logger,(f"删除任务时同时删除本地文件设置已更新为: {enabled}")
         return jsonify({"message": "设置已更新"})
     except Exception as e:
-        logger.error(f"更新设置失败: {e}")
+        log_error(logger,(f"更新设置失败: {e}")
         return jsonify({"error": str(e)}), 500
 
 # 用于切换 auto_delete_completed_tasks 设置
@@ -2359,10 +2343,10 @@ def toggle_auto_delete_completed_tasks():
                   ('True' if enabled else 'False', 'auto_delete_completed_tasks'))
         db.commit()
         
-        logger.info(f"自动删除已完成任务设置已更新为: {enabled}")
+        log_info(logger,(f"自动删除已完成任务设置已更新为: {enabled}")
         return jsonify({"message": "设置已更新"})
     except Exception as e:
-        logger.error(f"更新设置失败: {e}")
+        log_error(logger,(f"更新设置失败: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/download/get-magnet-links', methods=['POST'])
@@ -2408,12 +2392,12 @@ def get_magnet_links():
                     magnet_link = client.torrents_info(hashes=[task_id])[0].magnet_uri
                     magnet_links.append(magnet_link)
                 except IndexError:
-                    logger.warning(f"任务 ID {task_id} 未找到对应的磁力链接")
+                    log_warning(logger,(f"任务 ID {task_id} 未找到对应的磁力链接")
                     continue
 
         return jsonify({"magnetLinks": magnet_links})
     except Exception as e:
-        logger.error(f"获取磁力链接失败: {e}")
+        log_error(logger,(f"获取磁力链接失败: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/test_downloader_connection', methods=['POST'])
@@ -2455,7 +2439,7 @@ def test_downloader_connection():
             return jsonify({"success": False, "message": "不支持的下载器类型"}), 400
             
     except Exception as e:
-        logger.error(f"下载器连接测试失败: {e}")
+        log_error(logger,(f"下载器连接测试失败: {e}")
         return jsonify({"success": False, "message": str(e)}), 200
 
 @app.route('/test_tmm_connection', methods=['POST'])
@@ -2528,7 +2512,7 @@ def test_tmm_connection():
             "message": "连接错误，请检查URL配置和网络连接"
         }), 400
     except Exception as e:
-        logger.error(f"TMM连接测试失败: {e}")
+        log_error(logger,(f"TMM连接测试失败: {e}")
         return jsonify({
             "success": False, 
             "message": f"测试过程中发生错误: {str(e)}"
@@ -2551,18 +2535,18 @@ def restart_program():
     重启程序：结束主进程以触发自动重启
     """
     try:
-        logger.info("开始执行程序重启操作")
+        log_info(logger,("开始执行程序重启操作")
         
         # 检查是否有重启权限
         if not session.get('user_id'):
-            logger.warning("未授权用户尝试执行重启")
+            log_warning(logger,("未授权用户尝试执行重启")
             return jsonify({"error": "未授权的操作"}), 403
 
-        logger.info("准备重启程序，正在结束主进程...")
+        log_info(logger,("准备重启程序，正在结束主进程...")
         
         # 异步重启容器
         def restart_container():
-            logger.info("正在重启容器...")
+            log_info(logger,("正在重启容器...")
             time.sleep(2)
             # 查找并结束主进程
             target_process_name = "main.py"
@@ -2572,16 +2556,16 @@ def restart_program():
                 try:
                     # 检查进程是否运行了 main.py
                     if target_process_name in proc.info['cmdline']:
-                        logger.info(f"找到目标进程: PID={proc.info['pid']}, CMD={proc.info['cmdline']}")
+                        log_info(logger,(f"找到目标进程: PID={proc.info['pid']}, CMD={proc.info['cmdline']}")
                         proc.terminate()  # 发送终止信号
                         proc.wait(timeout=5)  # 等待进程结束
                         found_process = True
-                        logger.info(f"已成功结束进程: PID={proc.info['pid']}")
+                        log_info(logger,(f"已成功结束进程: PID={proc.info['pid']}")
                 except (psutil.NoSuchProcess, psutil.TimeoutExpired):
                     continue
 
             if not found_process:
-                logger.warning("未找到运行中的 python main.py 进程")
+                log_warning(logger,("未找到运行中的 python main.py 进程")
         
         # 启动后台线程执行重启操作
         threading.Thread(target=restart_container).start()
@@ -2589,7 +2573,7 @@ def restart_program():
         return jsonify({"message": "重启命令已发送！程序将自动重启。"}), 200
         
     except Exception as e:
-        logger.error(f"重启程序失败: {e}")
+        log_error(logger,(f"重启程序失败: {e}")
         return jsonify({"error": "重启失败，请稍后再试。"}), 500
 
 @app.route('/reset_program', methods=['POST'])
@@ -2599,11 +2583,11 @@ def reset_program():
     重置程序：删除/config目录中的所有文件并重启容器，但保留client_id文件
     """
     try:
-        logger.info("开始执行程序重置操作")
+        log_info(logger,("开始执行程序重置操作")
         
         # 检查是否有重置权限
         if not session.get('user_id'):
-            logger.warning("未授权用户尝试执行重置")
+            log_warning(logger,("未授权用户尝试执行重置")
             return jsonify({"error": "未授权的操作"}), 403
 
         # 删除/config目录中的所有文件和子目录，但保留/config目录本身和client_id文件
@@ -2612,23 +2596,23 @@ def reset_program():
             for item in os.listdir(config_dir):
                 # 跳过client_id文件
                 if item == 'client_id':
-                    logger.info("保留client_id文件")
+                    log_info(logger,("保留client_id文件")
                     continue
                     
                 item_path = os.path.join(config_dir, item)
                 if os.path.isfile(item_path) or os.path.islink(item_path):
                     os.unlink(item_path)
-                    logger.info(f"已删除文件: {item_path}")
+                    log_info(logger,(f"已删除文件: {item_path}")
                 elif os.path.isdir(item_path):
                     import shutil
                     shutil.rmtree(item_path)
-                    logger.info(f"已删除目录: {item_path}")
+                    log_info(logger,(f"已删除目录: {item_path}")
         
-        logger.info("配置文件已清理完成，准备重启容器")
+        log_info(logger,("配置文件已清理完成，准备重启容器")
         
         # 异步重启容器
         def restart_container():
-            logger.info("正在重启容器...")
+            log_info(logger,("正在重启容器...")
             time.sleep(2)
             # 查找并结束主进程
             target_process_name = "main.py"
@@ -2638,16 +2622,16 @@ def reset_program():
                 try:
                     # 检查进程是否运行了 main.py
                     if target_process_name in proc.info['cmdline']:
-                        logger.info(f"找到目标进程: PID={proc.info['pid']}, CMD={proc.info['cmdline']}")
+                        log_info(logger,(f"找到目标进程: PID={proc.info['pid']}, CMD={proc.info['cmdline']}")
                         proc.terminate()  # 发送终止信号
                         proc.wait(timeout=5)  # 等待进程结束
                         found_process = True
-                        logger.info(f"已成功结束进程: PID={proc.info['pid']}")
+                        log_info(logger,(f"已成功结束进程: PID={proc.info['pid']}")
                 except (psutil.NoSuchProcess, psutil.TimeoutExpired):
                     continue
 
             if not found_process:
-                logger.warning("未找到运行中的 python main.py 进程")
+                log_warning(logger,("未找到运行中的 python main.py 进程")
         
         # 启动后台线程执行重启操作
         threading.Thread(target=restart_container).start()
@@ -2655,7 +2639,7 @@ def reset_program():
         return jsonify({"message": "重置成功！程序将重启以恢复默认配置。"}), 200
         
     except Exception as e:
-        logger.error(f"重置程序失败: {e}")
+        log_error(logger,(f"重置程序失败: {e}")
         return jsonify({"error": "重置失败，请稍后再试。"}), 500
 
 @app.route('/check_update', methods=['GET'])
@@ -2677,11 +2661,11 @@ def check_update():
             if response.status_code != 200:
                 raise Exception(f"主地址返回异常: {response.text}")
         except Exception as e:
-            logger.warning(f"主地址连接失败，尝试代理: {e}")
+            log_warning(logger,(f"主地址连接失败，尝试代理: {e}")
             response = requests.get(proxy_url, timeout=8)
 
         if response.status_code != 200:
-            logger.error(f"无法获取 GitHub 版本信息: {response.text}")
+            log_error(logger,(f"无法获取 GitHub 版本信息: {response.text}")
             return jsonify({"error": "无法连接到 GitHub，请稍后再试。"}), 500
 
         releases = response.json()
@@ -2693,13 +2677,13 @@ def check_update():
             if latest_response.status_code == 200:
                 latest_stable_release = latest_response.json()
         except Exception as e:
-            logger.warning(f"获取latest release失败，尝试代理: {e}")
+            log_warning(logger,(f"获取latest release失败，尝试代理: {e}")
             try:
                 latest_response = requests.get(proxy_latest_url, timeout=8)
                 if latest_response.status_code == 200:
                     latest_stable_release = latest_response.json()
             except Exception as e2:
-                logger.warning(f"代理获取latest release也失败: {e2}")
+                log_warning(logger,(f"代理获取latest release也失败: {e2}")
 
         # 如果无法获取GitHub标记的latest release，则查找第一个非预发布版本
         if not latest_stable_release:
@@ -2747,7 +2731,7 @@ def check_update():
 
         return jsonify(result)
     except Exception as e:
-        logger.error(f"检查更新失败: {e}")
+        log_error(logger,(f"检查更新失败: {e}")
         return jsonify({"error": "检查更新失败，请稍后再试。"}), 500
 
 def get_all_proxies_sorted(original_url):
@@ -2782,7 +2766,7 @@ def get_all_proxies_sorted(original_url):
         except requests.RequestException as e:
             # 即使请求失败，也给予较低优先级而非完全排除
             response_times[proxy] = float('inf')
-            logger.warning(f"代理 {proxy} 测试失败: {e}")
+            log_warning(logger,(f"代理 {proxy} 测试失败: {e}")
     
     # 原始地址作为后备选项
     response_times[original_url] = float('inf')  # 设为最低优先级
@@ -2806,10 +2790,10 @@ def perform_update():
 
         # 检查是否有更新权限
         if not session.get('user_id'):
-            logger.warning("未授权用户尝试执行更新")
+            log_warning(logger,("未授权用户尝试执行更新")
             return jsonify({"error": "未授权的操作"}), 403
 
-        logger.info(f"开始执行更新操作，更新类型: {update_type}")
+        log_info(logger,(f"开始执行更新操作，更新类型: {update_type}")
         
         # 步骤1: 获取所有代理并按速度排序
         original_url = "https://github.com/smysong/mediamaster-v2.git"
@@ -2821,10 +2805,10 @@ def perform_update():
         
         for proxy_identifier, proxy_url in proxy_list:
             try:
-                logger.info(f"尝试使用地址: {proxy_url}")
+                log_info(logger,(f"尝试使用地址: {proxy_url}")
                 
                 # 设置 Git 远程仓库地址
-                logger.info(f"正在设置 Git 远程仓库地址: {proxy_url}")
+                log_info(logger,(f"正在设置 Git 远程仓库地址: {proxy_url}")
                 set_remote_result = subprocess.run(
                     ['git', 'remote', 'set-url', 'origin', proxy_url],
                     capture_output=True,
@@ -2833,12 +2817,12 @@ def perform_update():
                 )
                 
                 if set_remote_result.returncode != 0:
-                    logger.warning(f"设置远程仓库地址失败: {set_remote_result.stderr}")
+                    log_warning(logger,(f"设置远程仓库地址失败: {set_remote_result.stderr}")
                     last_error = set_remote_result.stderr
                     continue
                 
                 # 重置本地更改，确保干净的更新环境
-                logger.info("正在放弃本地更改...")
+                log_info(logger,("正在放弃本地更改...")
                 checkout_result = subprocess.run(
                     ['git', 'checkout', '.'],
                     capture_output=True,
@@ -2847,14 +2831,14 @@ def perform_update():
                 )
                 
                 if checkout_result.returncode != 0:
-                    logger.warning(f"放弃本地更改失败: {checkout_result.stderr}")
+                    log_warning(logger,(f"放弃本地更改失败: {checkout_result.stderr}")
                     last_error = checkout_result.stderr
                     continue
                            
                 # 根据更新类型执行不同的更新操作
                 if update_type == 'prerelease':
                     # 更新到最新的预发布版本
-                    logger.info("正在获取最新的预发布版本标签...")
+                    log_info(logger,("正在获取最新的预发布版本标签...")
                     
                     # 先获取所有发布版本信息
                     repo_urls = [
@@ -2870,11 +2854,11 @@ def perform_update():
                                 releases = response.json()
                                 break
                         except Exception as e:
-                            logger.warning(f"获取release信息失败: {e}")
+                            log_warning(logger,(f"获取release信息失败: {e}")
                             continue
                     
                     if not releases:
-                        logger.error("无法获取 GitHub 版本信息")
+                        log_error(logger,("无法获取 GitHub 版本信息")
                         last_error = "无法获取 GitHub 版本信息"
                         continue
                     
@@ -2888,14 +2872,14 @@ def perform_update():
                             break
                     
                     if not prerelease_version_tag:
-                        logger.warning("未找到预发布版本")
+                        log_warning(logger,("未找到预发布版本")
                         last_error = "未找到预发布版本"
                         continue
                     
-                    logger.info(f"最新的预发布版本标签: {prerelease_version_tag}")
+                    log_info(logger,(f"最新的预发布版本标签: {prerelease_version_tag}")
                     
                     # 拉取指定标签的代码
-                    logger.info("正在从 Git 仓库拉取最新预发布版本代码...")
+                    log_info(logger,("正在从 Git 仓库拉取最新预发布版本代码...")
                     fetch_result = subprocess.run(
                         ['git', 'fetch', '--all'],
                         capture_output=True,
@@ -2905,12 +2889,12 @@ def perform_update():
                     
                     if fetch_result.returncode != 0:
                         error_message = f"Git fetch 失败: {fetch_result.stderr}"
-                        logger.error(error_message)
+                        log_error(logger,(error_message)
                         last_error = fetch_result.stderr
                         continue
                     
                     # 检出特定标签
-                    logger.info(f"正在检出预发布版本 {prerelease_version_tag}...")
+                    log_info(logger,(f"正在检出预发布版本 {prerelease_version_tag}...")
                     checkout_result = subprocess.run(
                         ['git', 'checkout', prerelease_version_tag],
                         capture_output=True,
@@ -2920,7 +2904,7 @@ def perform_update():
                     
                     if checkout_result.returncode != 0:
                         error_message = f"Git checkout 失败: {checkout_result.stderr}"
-                        logger.error(error_message)
+                        log_error(logger,(error_message)
                         last_error = checkout_result.stderr
                         continue
                     
@@ -2933,15 +2917,15 @@ def perform_update():
                     )
                     
                     if pull_result.returncode == 0:
-                        logger.info(f"Git 拉取预发布版本成功: {pull_result.stdout}")
+                        log_info(logger,(f"Git 拉取预发布版本成功: {pull_result.stdout}")
                         git_pull_success = True
                         break
                     else:
                         last_error = pull_result.stderr
-                        logger.warning(f"Git 拉取预发布版本失败: {last_error}")
+                        log_warning(logger,(f"Git 拉取预发布版本失败: {last_error}")
                 else:
                     # 更新到最新稳定版本（默认行为）
-                    logger.info("正在获取最新的稳定版本标签...")
+                    log_info(logger,("正在获取最新的稳定版本标签...")
                     
                     # 获取所有发布版本信息
                     repo_urls = [
@@ -2957,19 +2941,19 @@ def perform_update():
                                 latest_stable_release = response.json()
                                 break
                         except Exception as e:
-                            logger.warning(f"获取latest release失败: {e}")
+                            log_warning(logger,(f"获取latest release失败: {e}")
                             continue
                     
                     if not latest_stable_release:
-                        logger.error("无法获取最新的稳定版本信息")
+                        log_error(logger,("无法获取最新的稳定版本信息")
                         last_error = "无法获取最新的稳定版本信息"
                         continue
                         
                     stable_version_tag = latest_stable_release.get("tag_name")
-                    logger.info(f"最新的稳定版本标签: {stable_version_tag}")
+                    log_info(logger,(f"最新的稳定版本标签: {stable_version_tag}")
                     
                     # 拉取指定标签的代码
-                    logger.info("正在从 Git 仓库拉取最新稳定版本代码...")
+                    log_info(logger,("正在从 Git 仓库拉取最新稳定版本代码...")
                     fetch_result = subprocess.run(
                         ['git', 'fetch', '--all'],
                         capture_output=True,
@@ -2979,12 +2963,12 @@ def perform_update():
                     
                     if fetch_result.returncode != 0:
                         error_message = f"Git fetch 失败: {fetch_result.stderr}"
-                        logger.error(error_message)
+                        log_error(logger,(error_message)
                         last_error = fetch_result.stderr
                         continue
                     
                     # 检出特定标签
-                    logger.info(f"正在检出稳定版本 {stable_version_tag}...")
+                    log_info(logger,(f"正在检出稳定版本 {stable_version_tag}...")
                     checkout_result = subprocess.run(
                         ['git', 'checkout', stable_version_tag],
                         capture_output=True,
@@ -2994,7 +2978,7 @@ def perform_update():
                     
                     if checkout_result.returncode != 0:
                         error_message = f"Git checkout 失败: {checkout_result.stderr}"
-                        logger.error(error_message)
+                        log_error(logger,(error_message)
                         last_error = checkout_result.stderr
                         continue
                     
@@ -3007,25 +2991,25 @@ def perform_update():
                     )
                     
                     if pull_result.returncode == 0:
-                        logger.info(f"Git 拉取稳定版本成功: {pull_result.stdout}")
+                        log_info(logger,(f"Git 拉取稳定版本成功: {pull_result.stdout}")
                         git_pull_success = True
                         break
                     else:
                         last_error = pull_result.stderr
-                        logger.warning(f"Git 拉取稳定版本失败: {last_error}")
+                        log_warning(logger,(f"Git 拉取稳定版本失败: {last_error}")
                         
             except Exception as e:
                 last_error = str(e)
-                logger.warning(f"使用地址 {proxy_url} 更新失败: {e}")
+                log_warning(logger,(f"使用地址 {proxy_url} 更新失败: {e}")
                 continue
         
         if not git_pull_success:
             error_message = f"所有地址更新均失败，最后错误信息: {last_error}"
-            logger.error(error_message)
+            log_error(logger,(error_message)
             return jsonify({"error": error_message}), 500
 
         # 步骤3: 安装依赖（如果有新的依赖）
-        logger.info("正在安装新依赖...")
+        log_info(logger,("正在安装新依赖...")
         install_result = subprocess.run(
             ['pip', 'install', '-r', 'requirements.txt', '--index-url', 'https://mirrors.aliyun.com/pypi/simple/'],
             capture_output=True,
@@ -3035,13 +3019,13 @@ def perform_update():
 
         if install_result.returncode != 0:
             error_message = f"依赖安装失败: {install_result.stderr}"
-            logger.error(error_message)
+            log_error(logger,(error_message)
             return jsonify({"error": error_message}), 500
 
-        logger.info(f"依赖安装成功: {install_result.stdout}")
+        log_info(logger,(f"依赖安装成功: {install_result.stdout}")
 
         # 步骤4: 返回成功消息
-        logger.info("执行更新已完成！")
+        log_info(logger,("执行更新已完成！")
         response = jsonify({
             "message": "更新成功！系统将结束主进程并自动重启。如未自动重启，请手动重启容器。",
             "current_version": current_version
@@ -3049,7 +3033,7 @@ def perform_update():
         
         # 异步重启容器
         def restart_container():
-            logger.info("正在重启容器...")
+            log_info(logger,("正在重启容器...")
             time.sleep(2)
             # 查找并结束主进程
             target_process_name = "main.py"
@@ -3058,16 +3042,16 @@ def perform_update():
                 try:
                     # 检查进程是否运行了 main.py
                     if target_process_name in (proc.info['cmdline'] or []):
-                        logger.info(f"找到目标进程: PID={proc.info['pid']}, CMD={proc.info['cmdline']}")
+                        log_info(logger,(f"找到目标进程: PID={proc.info['pid']}, CMD={proc.info['cmdline']}")
                         proc.terminate()  # 发送终止信号
                         proc.wait(timeout=5)  # 等待进程结束
                         found_process = True
-                        logger.info(f"已成功结束进程: PID={proc.info['pid']}")
+                        log_info(logger,(f"已成功结束进程: PID={proc.info['pid']}")
                 except (psutil.NoSuchProcess, psutil.TimeoutExpired):
                     continue
 
             if not found_process:
-                logger.warning("未找到运行中的 python main.py 进程")
+                log_warning(logger,("未找到运行中的 python main.py 进程")
         
         # 启动后台线程执行重启操作
         threading.Thread(target=restart_container, daemon=True).start()
@@ -3075,11 +3059,11 @@ def perform_update():
         return response
         
     except Exception as e:
-        logger.error(f"执行更新失败: {e}")
+        log_error(logger,(f"执行更新失败: {e}")
         return jsonify({"error": "更新过程中发生未知错误，请查看日志了解详情。"}), 500
 
 if __name__ == '__main__':
-    logger.info("程序已启动")
+    log_info(logger,("程序已启动")
     # 创建硬链接
     src_dir = '/config/avatars'
     dst_dir = '/app/static/uploads/avatars'
@@ -3091,10 +3075,10 @@ if __name__ == '__main__':
         port_env = os.environ.get('PORT')
         if port_env:
             port = int(port_env)
-            logger.info(f"使用自定义端口: {port}")
+            log_info(logger,(f"使用自定义端口: {port}")
         else:
-            logger.info("使用默认端口: 8888")
+            log_info(logger,("使用默认端口: 8888")
     except (ValueError, TypeError):
-        logger.warning(f"环境变量PORT值无效，使用默认端口: 8888")
+        log_warning(logger,(f"环境变量PORT值无效，使用默认端口: 8888")
     
     app.run(host='0.0.0.0', port=port, debug=False)
