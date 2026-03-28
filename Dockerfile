@@ -1,69 +1,46 @@
-# 使用 Alpine 3.20 版本作为基础镜像（更稳定）
-FROM alpine:3.20
+# MediaMaster V2 - 优化版 Dockerfile
+# 基于 Alpine + Python，移除 Selenium 依赖（轻量级）
 
-# 设置工作目录
+FROM python:3.11-slim
+
+# 设置环境
+ENV LANG=zh_CN.UTF-8 \
+    LC_ALL=zh_CN.UTF-8 \
+    TZ=Asia/Shanghai \
+    PYTHONUNBUFFERED=1
+
+# 安装系统依赖
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# 创建应用目录
 WORKDIR /app
 
-# 安装基础工具和依赖
-RUN apk add --no-cache \
-    bash \
-    curl \
-    unzip \
-    python3 \
-    python3-dev \
-    py3-pip \
-    chromium \
-    chromium-chromedriver \
-    tzdata \
-    iproute2 \
-    iputils \
-    bind-tools \
-    vim \
-    tini \
-    musl-locales \
-    musl-locales-lang \
-    gcc \
-    musl-dev \
-    linux-headers
+# 克隆仓库（或复制本地文件）
+RUN git clone https://github.com/jinting1996/mediamaster-v2.git /app
 
-# 设置时区为中国上海
-RUN cp /usr/share/zoneinfo/Asia/Shanghai /etc/localtime \
-    && echo "Asia/Shanghai" > /etc/timezone
+# 安装 Python 依赖
+RUN pip install --no-cache-dir \
+    requests \
+    beautifulsoup4 \
+    lxml \
+    sqlalchemy \
+    flask \
+    schedule \
+    transmission-rpc \
+    qbittorrent-api \
+    urllib3
 
-# 设置语言环境为简体中文
-ENV LANG=zh_CN.UTF-8
-ENV LC_ALL=zh_CN.UTF-8
+# 创建必要的目录
+RUN mkdir -p /config /Torrent /tmp/log /tmp/index
 
-# 创建日志保存目录
-RUN mkdir -p /tmp/log
+# 复制配置文件（如果存在）
+# COPY config/ /config/
 
-# 安装 git 用于克隆仓库
-RUN apk add --no-cache git
-
-# 克隆 Git 仓库到 /app 目录
-RUN git clone https://github.com/smysong/mediamaster-v2.git /app
-
-# 创建虚拟环境
-RUN python3 -m venv /app/venv
-
-# 激活虚拟环境并安装 Python 依赖
-# 在容器中永久设置 PATH 以优先使用虚拟环境中的 python 和 pip
-ENV VIRTUAL_ENV=/app/venv
-ENV PATH="/app/venv/bin:$PATH"
-
-# 升级 pip 并安装依赖
-RUN pip install --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt && \
-    pip install schedule
-
-# 确保 set_ulimits.sh 脚本具有执行权限
-RUN chmod +x /app/set_ulimits.sh
-
-# 声明监听端口
+# 暴露端口
 EXPOSE 8888
 
-# 使用 tini 作为主进程管理工具
-ENTRYPOINT ["/sbin/tini", "--"]
-
-# 启动应用
+# 启动命令
 CMD ["python", "main.py"]
