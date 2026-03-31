@@ -1,9 +1,13 @@
 import os
 import json
-from app.core.database import execute_query
-from app.core.config import setup_logger
+from app.utils.logging import setup_logger
 
 logger = setup_logger()
+
+# 延迟导入以避免循环导入
+def execute_query(query, params=(), commit=False):
+    from app.core.database import execute_query as db_execute_query
+    return db_execute_query(query, params, commit)
 
 class ConfigManager:
     """配置管理类"""

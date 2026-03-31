@@ -1,7 +1,7 @@
 import sqlite3
 import threading
 from flask import g
-from app.core.config import DATABASE, setup_logger
+from app.utils.logging import setup_logger
 
 logger = setup_logger()
 
@@ -12,6 +12,9 @@ class DatabaseManager:
         self.lock = threading.RLock()
 
     def get_connection(self, thread_id):
+        # 延迟导入DATABASE以避免循环导入
+        from app.core.config import DATABASE
+        
         with self.lock:
             if thread_id not in self.connections:
                 try:

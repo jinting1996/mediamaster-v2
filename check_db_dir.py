@@ -6,6 +6,9 @@ import shutil
 import time
 from datetime import datetime, timedelta
 
+# 获取虚拟环境中的python可执行文件路径
+VENV_PYTHON = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'venv', 'Scripts', 'python.exe')
+
 # 定义日志保存目录和处理记录保存目录
 log_dir = "/tmp/log"  # 日志保存目录
 indexer = "/tmp/index"  # 资源索引保存目录
@@ -139,7 +142,7 @@ def check_database():
         ensure_directory_exists(log_dir)
         
         # 调用 database_manager.py 脚本
-        subprocess.run(['python', 'database_manager.py'], check=True, capture_output=True, text=True)
+        subprocess.run([VENV_PYTHON, 'database_manager.py'], check=True, capture_output=True, text=True)
         logging.info("数据库检查完成。")
         
         # 获取状态码并处理

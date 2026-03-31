@@ -10,6 +10,9 @@ import psutil
 import threading
 import concurrent.futures
 
+# 获取虚拟环境中的python可执行文件路径
+VENV_PYTHON = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'venv', 'Scripts', 'python.exe')
+
 # 配置日志
 from app.utils.logging import setup_logger, log_error, log_info, log_warning, log_debug
 logger = setup_logger(name="MainLogger", log_file="/tmp/log/main.log")
@@ -17,28 +20,75 @@ logger = setup_logger(name="MainLogger", log_file="/tmp/log/main.log")
 # 创建线程池
 executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 
+# 数据库连接池管理
+class DatabasePool:
+    def __init__(self, db_path):
+        self.db_path = db_path
+        self.connections = {}
+        self.lock = threading.RLock()
+
+    def get_connection(self):
+        thread_id = threading.get_ident()
+        with self.lock:
+            if thread_id not in self.connections:
+                try:
+                    conn = sqlite3.connect(self.db_path, check_same_thread=False)
+                    conn.row_factory = sqlite3.Row
+                    # 启用外键约束
+                    conn.execute('PRAGMA foreign_keys = ON')
+                    # 启用 WAL 模式以提高并发性能
+                    conn.execute('PRAGMA journal_mode = WAL')
+                    # 设置缓存大小
+                    conn.execute('PRAGMA cache_size = -64000')  # 64MB 缓存
+                    self.connections[thread_id] = conn
+                    log_debug(logger, f"Created new database connection for thread {thread_id}")
+                except Exception as e:
+                    log_error(logger, f"Error creating database connection: {e}")
+                    raise
+            return self.connections[thread_id]
+
+    def close_all_connections(self):
+        with self.lock:
+            for conn in self.connections.values():
+                try:
+                    conn.close()
+                except Exception as e:
+                    log_error(logger, f"Error closing database connection: {e}")
+            self.connections.clear()
+
+# 配置管理
+class ConfigManager:
+    def __init__(self, db_pool):
+        self.db_pool = db_pool
+
+    def get_config(self, key, default=None):
+        try:
+            conn = self.db_pool.get_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT VALUE FROM CONFIG WHERE OPTION = ?;", (key,))
+            result = cursor.fetchone()
+            if result:
+                return result[0]
+            else:
+                log_warning(logger, f"未找到 {key} 配置项，使用默认值 {default}。")
+                return default
+        except Exception as e:
+            log_error(logger, f"无法从数据库读取 {key} 配置项，使用默认值 {default}。", e)
+            return default
+
+# 创建数据库连接池
+DB_PATH = os.environ.get('DATABASE_PATH', '/config/data.db')
+db_pool = DatabasePool(DB_PATH)
+config_manager = ConfigManager(db_pool)
+
 def get_run_interval_from_db():
-    try:
-        conn = sqlite3.connect('/config/data.db')
-        cursor = conn.cursor()
-        cursor.execute("SELECT VALUE FROM CONFIG WHERE OPTION = 'run_interval_hours';")
-        result = cursor.fetchone()
-        cursor.close()
-        conn.close()
-        if result:
-            return int(result[0])
-        else:
-            log_warning(logger, "未找到 run_interval_hours 配置项，使用默认值 6 小时。")
-            return 6
-    except Exception as e:
-        log_error(logger, "无法从数据库读取 run_interval_hours，使用默认值 6 小时。", e)
-        return 6
+    return int(config_manager.get_config('run_interval_hours', '6'))
 
 def run_script(script_name):
     """异步执行脚本"""
     def execute_script():
         try:
-            result = subprocess.run(['python', script_name], check=True, capture_output=True, text=True)
+            result = subprocess.run([VENV_PYTHON, script_name], check=True, capture_output=True, text=True)
             log_debug(logger, f"{script_name} 已执行完毕。")
             return True
         except subprocess.CalledProcessError as e:
@@ -53,7 +103,7 @@ def run_script(script_name):
 def start_app():
     try:
         with open(os.devnull, 'w') as devnull:
-            process = subprocess.Popen(['python', '-m', 'app'], stdout=devnull, stderr=devnull)
+            process = subprocess.Popen([VENV_PYTHON, 'app.py'], stdout=devnull, stderr=devnull)
             log_info(logger, "WEB管理已启动。")
             return process.pid
     except Exception as e:
@@ -65,7 +115,7 @@ def start_sync():
         try:
             # 延时2分钟启动
             time.sleep(120)
-            process = subprocess.Popen(['python', 'sync.py'])
+            process = subprocess.Popen([VENV_PYTHON, 'sync.py'])
             log_info(logger, "目录监控服务已启动。")
             # 保存进程ID供后续使用
             global sync_pid
@@ -82,7 +132,7 @@ def start_sync():
 
 def start_xunlei_torrent():
     try:
-        process = subprocess.Popen(['python', 'xunlei_torrent.py'])
+        process = subprocess.Popen([VENV_PYTHON, 'xunlei_torrent.py'])
         log_info(logger, "迅雷-种子监听服务已启动。")
         return process.pid
     except Exception as e:
@@ -91,7 +141,7 @@ def start_xunlei_torrent():
 
 def start_check_db_dir():
     try:
-        process = subprocess.Popen(['python', 'check_db_dir.py'])
+        process = subprocess.Popen([VENV_PYTHON, 'check_db_dir.py'])
         log_info(logger, "启动数据库和目录检查服务")
         return process.pid
     except Exception as e:
@@ -100,7 +150,7 @@ def start_check_db_dir():
 
 def report_versions():
     try:
-        process = subprocess.Popen(['python', 'report_versions.py'])
+        process = subprocess.Popen([VENV_PYTHON, 'report_versions.py'])
         log_info(logger, "启动版本检测及统计服务")
         return process.pid
     except Exception as e:
@@ -217,25 +267,50 @@ def shutdown_handler(signum, frame):
 
     running = False
 
+    # 终止子进程
     if app_pid:
         log_info(logger, f"终止 app.py 进程 (PID: {app_pid})")
         try:
             os.kill(app_pid, signal.SIGTERM)
+            # 等待进程终止
+            for _ in range(5):
+                if not psutil.pid_exists(app_pid):
+                    break
+                time.sleep(1)
         except ProcessLookupError:
             log_warning(logger, f"进程 {app_pid} 不存在，跳过终止操作。")
+        except Exception as e:
+            log_error(logger, f"终止 app.py 进程失败: {e}")
 
     if sync_pid:
         log_info(logger, f"终止 sync.py 进程 (PID: {sync_pid})")
         try:
             os.kill(sync_pid, signal.SIGTERM)
+            # 等待进程终止
+            for _ in range(5):
+                if not psutil.pid_exists(sync_pid):
+                    break
+                time.sleep(1)
         except ProcessLookupError:
             log_warning(logger, f"进程 {sync_pid} 不存在，跳过终止操作。")
+        except Exception as e:
+            log_error(logger, f"终止 sync.py 进程失败: {e}")
 
     # 关闭线程池
     log_info(logger, "关闭线程池...")
-    executor.shutdown(wait=True, cancel_futures=True)
+    try:
+        executor.shutdown(wait=True, cancel_futures=True)
+    except Exception as e:
+        log_error(logger, f"关闭线程池失败: {e}")
 
-    time.sleep(5)
+    # 关闭数据库连接池
+    log_info(logger, "关闭数据库连接池...")
+    try:
+        db_pool.close_all_connections()
+    except Exception as e:
+        log_error(logger, f"关闭数据库连接池失败: {e}")
+
+    time.sleep(2)
     log_info(logger, "程序已关闭。")
     sys.exit(0)
 
